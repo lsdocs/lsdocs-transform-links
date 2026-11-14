@@ -45,7 +45,9 @@ use serde_json::{Value, json};
 
 /// The plugin, as registered with the host.
 pub fn plugin() -> Plugin {
-    Plugin::new("transform-links", env!("CARGO_PKG_VERSION")).transformer(Links)
+    Plugin::new("transform-links", env!("CARGO_PKG_VERSION"))
+        .transformer(Links)
+        .cacheable()
 }
 
 /// The links transformer.
