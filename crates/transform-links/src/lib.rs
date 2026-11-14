@@ -30,6 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lsdocs_plugin_sdk::doctree::{
     Custom, Link, List, ListItem, Node, Paragraph, Strong, plain_text, text,
 };
+use lsdocs_plugin_sdk::links::{UrlTarget as Target, resolve_url as resolve};
 use lsdocs_plugin_sdk::protocol::{
     Diagnostic, Severity, TransformApplyParams, TransformApplyResult, TransformCollectParams,
     TransformCollectResult,
@@ -282,131 +283,12 @@ fn visit(nodes: &mut [Node], f: &mut impl FnMut(&mut Node)) {
     }
 }
 
-/// Where a link points.
-#[derive(Debug, PartialEq, Eq)]
-enum Target {
-    /// Another site, or a non-file scheme such as `mailto:`.
-    External,
-    /// Above the source directory.
-    Outside,
-    /// A file in the site, by its path relative to the source directory
-    /// (`None` for the linking document itself), and an optional fragment.
-    Internal {
-        path: Option<String>,
-        fragment: Option<String>,
-    },
-}
-
-/// Resolves `url`, found in the document `from`.
-fn resolve(url: &str, from: &str) -> Target {
-    let has_scheme = url.split_once(':').is_some_and(|(scheme, _)| {
-        !scheme.is_empty()
-            && scheme
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
-    });
-    if has_scheme || url.starts_with("//") {
-        return Target::External;
-    }
-    let (rest, fragment) = match url.split_once('#') {
-        Some((rest, fragment)) => (rest, Some(percent_decode(fragment))),
-        None => (url, None),
-    };
-    let fragment = fragment.filter(|f| !f.is_empty());
-    let path = rest.split_once('?').map_or(rest, |(path, _)| path);
-    if path.is_empty() {
-        return Target::Internal {
-            path: None,
-            fragment,
-        };
-    }
-    let path = percent_decode(path);
-    let (base, path) = match path.strip_prefix('/') {
-        Some(rooted) => ("", rooted),
-        None => (
-            from.rsplit_once('/').map_or("", |(dir, _)| dir),
-            path.as_str(),
-        ),
-    };
-    let mut parts: Vec<&str> = base.split('/').filter(|p| !p.is_empty()).collect();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                if parts.pop().is_none() {
-                    return Target::Outside;
-                }
-            }
-            part => parts.push(part),
-        }
-    }
-    let mut joined = parts.join("/");
-    if path.ends_with('/') && !joined.is_empty() {
-        joined.push('/');
-    }
-    Target::Internal {
-        path: Some(joined),
-        fragment,
-    }
-}
-
-/// Decodes `%XX` escapes; malformed escapes are kept as they are.
-fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && let Some(hex) = s.get(i + 1..i + 3)
-            && let Ok(byte) = u8::from_str_radix(hex, 16)
-        {
-            out.push(byte);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8(out).unwrap_or_else(|_| s.to_owned())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use lsdocs_plugin_sdk::doctree::{Document, Heading, Image, Span};
     use lsdocs_plugin_sdk::protocol::{InitializeParams, SiteInfo};
     use lsdocs_plugin_sdk::testing;
-
-    fn internal(path: Option<&str>, fragment: Option<&str>) -> Target {
-        Target::Internal {
-            path: path.map(Into::into),
-            fragment: fragment.map(Into::into),
-        }
-    }
-
-    #[test]
-    fn resolving() {
-        assert_eq!(resolve("https://x.org/a.md", "a.md"), Target::External);
-        assert_eq!(resolve("//cdn/x", "a.md"), Target::External);
-        assert_eq!(resolve("mailto:me@x.org", "a.md"), Target::External);
-        assert_eq!(resolve("#top", "g/a.md"), internal(None, Some("top")));
-        assert_eq!(resolve("?q=1", "g/a.md"), internal(None, None));
-        assert_eq!(resolve("b.md", "g/a.md"), internal(Some("g/b.md"), None));
-        assert_eq!(
-            resolve("../c/d.md?x#Sec%20One", "g/a.md"),
-            internal(Some("c/d.md"), Some("Sec One"))
-        );
-        assert_eq!(
-            resolve("/img/x.svg", "g/h/a.md"),
-            internal(Some("img/x.svg"), None)
-        );
-        assert_eq!(
-            resolve("./my%20file.md", "a.md"),
-            internal(Some("my file.md"), None)
-        );
-        assert_eq!(resolve("sub/", "a.md"), internal(Some("sub/"), None));
-        assert_eq!(resolve("../x.md", "a.md"), Target::Outside);
-    }
 
     fn heading(level: u8, id: &str, title: &str) -> Node {
         Node::Heading(Heading {
