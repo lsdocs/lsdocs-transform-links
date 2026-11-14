@@ -28,13 +28,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lsdocs_plugin_sdk::doctree::{
-    Custom, Document, Link, List, ListItem, Node, Paragraph, Strong, text,
+    Custom, Link, List, ListItem, Node, Paragraph, Strong, plain_text, text,
 };
 use lsdocs_plugin_sdk::protocol::{
     Diagnostic, Severity, TransformApplyParams, TransformApplyResult, TransformCollectParams,
     TransformCollectResult,
 };
-use lsdocs_plugin_sdk::{Context, Plugin, PluginResult, Transformer};
+use lsdocs_plugin_sdk::{Context, Plugin, PluginResult, Transformer, relative_path};
 use serde_json::{Value, json};
 
 /// The plugin, as registered with the host.
@@ -82,7 +82,7 @@ impl Transformer for Links {
             }
         }
         Ok(TransformCollectResult {
-            data: json!({ "title": title(doc), "anchors": anchors, "links": links }),
+            data: json!({ "title": doc.title().unwrap_or_else(|| doc.source.clone()), "anchors": anchors, "links": links }),
             diagnostics: vec![],
         })
     }
@@ -237,7 +237,7 @@ impl Site<'_> {
                 ListItem {
                     children: vec![Node::Paragraph(Paragraph {
                         children: vec![Node::Link(Link {
-                            url: relative(source, from),
+                            url: relative_path(source, from),
                             children: vec![text(title)],
                             ..Link::default()
                         })],
@@ -370,54 +370,10 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| s.to_owned())
 }
 
-/// A relative URL from the document `from` to the file `to`, both relative
-/// to the source directory.
-fn relative(from: &str, to: &str) -> String {
-    let from_dir: Vec<&str> = from.split('/').collect::<Vec<_>>();
-    let from_dir = &from_dir[..from_dir.len() - 1];
-    let to_parts: Vec<&str> = to.split('/').collect();
-    let common = from_dir
-        .iter()
-        .zip(&to_parts)
-        .take_while(|(a, b)| a == b)
-        .count();
-    let mut out = "../".repeat(from_dir.len() - common);
-    out.push_str(&to_parts[common..].join("/"));
-    out
-}
-
-/// The document's title: `title` front matter, else its first heading,
-/// else its source path.
-fn title(doc: &Document) -> String {
-    doc.metadata
-        .get("title")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .or_else(|| {
-            doc.descendants().find_map(|n| match n {
-                Node::Heading(h) => Some(plain_text(&h.children)),
-                _ => None,
-            })
-        })
-        .unwrap_or_else(|| doc.source.clone())
-}
-
-fn plain_text(nodes: &[Node]) -> String {
-    let mut out = String::new();
-    for node in nodes {
-        match node {
-            Node::Text(t) => out.push_str(&t.value),
-            Node::InlineCode(c) => out.push_str(&c.value),
-            other => out.push_str(&plain_text(other.children())),
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lsdocs_plugin_sdk::doctree::{Heading, Image, Span};
+    use lsdocs_plugin_sdk::doctree::{Document, Heading, Image, Span};
     use lsdocs_plugin_sdk::protocol::{InitializeParams, SiteInfo};
     use lsdocs_plugin_sdk::testing;
 
@@ -450,14 +406,6 @@ mod tests {
         );
         assert_eq!(resolve("sub/", "a.md"), internal(Some("sub/"), None));
         assert_eq!(resolve("../x.md", "a.md"), Target::Outside);
-    }
-
-    #[test]
-    fn relative_paths() {
-        assert_eq!(relative("index.md", "guide/a.md"), "guide/a.md");
-        assert_eq!(relative("guide/a.md", "index.md"), "../index.md");
-        assert_eq!(relative("guide/a.md", "guide/b.md"), "b.md");
-        assert_eq!(relative("guide/x/a.md", "ref/b.md"), "../../ref/b.md");
     }
 
     fn heading(level: u8, id: &str, title: &str) -> Node {
