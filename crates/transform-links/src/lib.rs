@@ -15,7 +15,8 @@
 //!   `[](guide.md#setup)`, gets the title of the heading it points to, or of
 //!   the page if it has no fragment.
 //! - **Adds backlinks** (if enabled): a `custom:backlinks` node at the end of
-//!   the document listing the pages that link to it.
+//!   the document listing the pages that link to it, by path or by a
+//!   label it defines.
 //!
 //! Options:
 //!
@@ -65,6 +66,8 @@ impl Transformer for Links {
         let doc = &params.document;
         let mut anchors = serde_json::Map::new();
         let mut links = BTreeSet::new();
+        // Labels linked to, resolved to documents in the apply pass.
+        let mut labels = BTreeSet::new();
         for node in doc.descendants() {
             // Anchors, with the title a cross-reference to them shows.
             let anchor = match node {
@@ -84,6 +87,14 @@ impl Transformer for Links {
                 anchors.entry(id.clone()).or_insert(json!(title));
             }
             if let Node::Link(l) = node {
+                if let Some(LinkTarget {
+                    document: None,
+                    label: Some(label),
+                    ..
+                }) = &l.target
+                {
+                    labels.insert(label.clone());
+                }
                 let path = match &l.target {
                     Some(target) => target.document.clone(),
                     None => match resolve(&l.url, &doc.source) {
@@ -97,7 +108,12 @@ impl Transformer for Links {
             }
         }
         Ok(TransformCollectResult {
-            data: json!({ "title": doc.title().unwrap_or_else(|| doc.source.clone()), "anchors": anchors, "links": links }),
+            data: json!({
+                "title": doc.title().unwrap_or_else(|| doc.source.clone()),
+                "anchors": anchors,
+                "links": links,
+                "labels": labels,
+            }),
             diagnostics: vec![],
         })
     }
@@ -291,10 +307,20 @@ impl Site<'_> {
             .pages?
             .iter()
             .filter(|(from, page)| {
-                *from != source
-                    && page["links"]
+                let strings = |key: &str| {
+                    page[key]
                         .as_array()
-                        .is_some_and(|links| links.iter().any(|l| l == source))
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                };
+                // Links to the page, or to a label it defines first.
+                *from != source
+                    && (strings("links").contains(&source)
+                        || strings("labels")
+                            .iter()
+                            .any(|label| self.label(label).first() == Some(&source)))
             })
             .map(|(from, page)| {
                 let title = page["title"].as_str().unwrap_or(from);
@@ -478,6 +504,44 @@ mod tests {
                 .iter()
                 .any(|n| n.kind() == "custom:backlinks")
         );
+    }
+
+    #[tokio::test]
+    async fn label_links_count_as_backlinks() {
+        use lsdocs_plugin_sdk::doctree::{LinkTarget, Section};
+        let mut a = Document::new("a.rst");
+        a.children = vec![Node::Paragraph(Paragraph {
+            children: vec![Node::Link(Link {
+                target: Some(LinkTarget {
+                    label: Some("intro".into()),
+                    ..LinkTarget::default()
+                }),
+                ..Link::default()
+            })],
+            ..Paragraph::default()
+        })];
+        let mut b = Document::new("b.rst");
+        b.children = vec![Node::Section(Section {
+            id: Some("intro".into()),
+            children: vec![heading(1, "", "Introduction")],
+            ..Section::default()
+        })];
+        let init = InitializeParams {
+            site: SiteInfo {
+                files: vec!["a.rst".into(), "b.rst".into()],
+                ..SiteInfo::default()
+            },
+            options: json!({"backlinks": true}),
+            ..InitializeParams::default()
+        };
+        let out = testing::run_transform(&plugin(), &init, vec![a, b])
+            .await
+            .unwrap();
+        let backlinks =
+            |doc: &Document| doc.children.iter().any(|n| n.kind() == "custom:backlinks");
+        assert!(!backlinks(&out[0].0));
+        assert!(backlinks(&out[1].0));
+        assert_eq!(texts(&out[1].0).last().unwrap(), "a.rst=a.rst");
     }
 
     #[tokio::test]
