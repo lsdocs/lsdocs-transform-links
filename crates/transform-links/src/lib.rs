@@ -378,6 +378,7 @@ fn visit(nodes: &mut [Node], f: &mut impl FnMut(&mut Node)) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::panic)]
     use super::*;
     use lsdocs_plugin_sdk::doctree::{Document, Heading, Image, Span};
     use lsdocs_plugin_sdk::protocol::{InitializeParams, SiteInfo};
