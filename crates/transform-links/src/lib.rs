@@ -115,6 +115,7 @@ impl Transformer for Links {
                 "labels": labels,
             }),
             diagnostics: vec![],
+            dependencies: vec![],
         })
     }
 
@@ -152,6 +153,7 @@ impl Transformer for Links {
         Ok(TransformApplyResult {
             document,
             diagnostics,
+            dependencies: vec![],
         })
     }
 }
