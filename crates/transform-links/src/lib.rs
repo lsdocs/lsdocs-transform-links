@@ -38,8 +38,8 @@ use lsdocs_plugin_sdk::doctree::{
 };
 use lsdocs_plugin_sdk::links::{UrlTarget as Target, resolve_url as resolve};
 use lsdocs_plugin_sdk::protocol::{
-    Diagnostic, Severity, TransformApplyParams, TransformApplyResult, TransformCollectParams,
-    TransformCollectResult,
+    Diagnostic, ParseTransformEachParams, ParseTransformEachResult, RenderTransformEachParams,
+    RenderTransformEachResult, Severity,
 };
 use lsdocs_plugin_sdk::{Context, Plugin, PluginResult, Transformer, relative_path};
 use serde_json::{Value, json};
@@ -56,13 +56,13 @@ pub fn plugin() -> Plugin {
 pub struct Links;
 
 impl Transformer for Links {
-    const COLLECTS: bool = true;
+    const READS: bool = true;
 
-    async fn collect(
+    async fn read(
         &self,
-        params: TransformCollectParams,
+        params: ParseTransformEachParams,
         _ctx: &Context,
-    ) -> PluginResult<TransformCollectResult> {
+    ) -> PluginResult<ParseTransformEachResult> {
         let doc = &params.document;
         let mut anchors = serde_json::Map::new();
         let mut links = BTreeSet::new();
@@ -107,7 +107,7 @@ impl Transformer for Links {
                 }
             }
         }
-        Ok(TransformCollectResult {
+        Ok(ParseTransformEachResult {
             data: json!({
                 "title": doc.title().unwrap_or_else(|| doc.source.clone()),
                 "anchors": anchors,
@@ -121,9 +121,9 @@ impl Transformer for Links {
 
     async fn apply(
         &self,
-        params: TransformApplyParams,
+        params: RenderTransformEachParams,
         ctx: &Context,
-    ) -> PluginResult<TransformApplyResult> {
+    ) -> PluginResult<RenderTransformEachResult> {
         let options = ctx.options();
         let flag = |name, default| {
             options
@@ -150,7 +150,7 @@ impl Transformer for Links {
                 document.children.push(node);
             }
         }
-        Ok(TransformApplyResult {
+        Ok(RenderTransformEachResult {
             document,
             diagnostics,
             dependencies: vec![],
