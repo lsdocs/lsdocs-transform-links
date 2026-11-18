@@ -50,7 +50,11 @@ pub fn plugin() -> Plugin {
         .settings(|c| {
             lsdocs_plugin_sdk::config::settings_toml_keys(
                 c,
-                &["check", "backlinks", "backlinks_title"],
+                &[
+                    ("check", lsdocs_plugin_sdk::config::Kind::Bool),
+                    ("backlinks", lsdocs_plugin_sdk::config::Kind::Bool),
+                    ("backlinks_title", lsdocs_plugin_sdk::config::Kind::String),
+                ],
             )
         })
         .transformer(Links)
