@@ -47,6 +47,12 @@ use serde_json::{Value, json};
 /// The plugin, as registered with the host.
 pub fn plugin() -> Plugin {
     Plugin::new("transform-links", env!("CARGO_PKG_VERSION"))
+        .settings(|c| {
+            lsdocs_plugin_sdk::config::settings_toml_keys(
+                c,
+                &["check", "backlinks", "backlinks_title"],
+            )
+        })
         .transformer(Links)
         .cacheable()
 }
@@ -124,7 +130,7 @@ impl Transformer for Links {
         params: RenderTransformEachParams,
         ctx: &Context,
     ) -> PluginResult<RenderTransformEachResult> {
-        let options = ctx.options();
+        let options = ctx.settings();
         let flag = |name, default| {
             options
                 .get(name)
@@ -440,16 +446,18 @@ mod tests {
 
     async fn build(options: Value) -> Vec<(Document, Vec<Diagnostic>)> {
         let plugin = plugin();
-        let init = InitializeParams {
-            site: SiteInfo {
-                files: ["guide/setup.md", "img/logo.svg", "index.md"]
-                    .map(String::from)
-                    .to_vec(),
-                ..SiteInfo::default()
+        let init = lsdocs_plugin_sdk::Setup::with_settings(
+            InitializeParams {
+                site: SiteInfo {
+                    files: ["guide/setup.md", "img/logo.svg", "index.md"]
+                        .map(String::from)
+                        .to_vec(),
+                    ..SiteInfo::default()
+                },
+                ..InitializeParams::default()
             },
             options,
-            ..InitializeParams::default()
-        };
+        );
         testing::run_transform(&plugin, &init, site())
             .await
             .unwrap()
@@ -529,14 +537,16 @@ mod tests {
             children: vec![heading(1, "", "Introduction")],
             ..Section::default()
         })];
-        let init = InitializeParams {
-            site: SiteInfo {
-                files: vec!["a.rst".into(), "b.rst".into()],
-                ..SiteInfo::default()
+        let init = lsdocs_plugin_sdk::Setup::with_settings(
+            InitializeParams {
+                site: SiteInfo {
+                    files: vec!["a.rst".into(), "b.rst".into()],
+                    ..SiteInfo::default()
+                },
+                ..InitializeParams::default()
             },
-            options: json!({"backlinks": true}),
-            ..InitializeParams::default()
-        };
+            json!({"backlinks": true}),
+        );
         let out = testing::run_transform(&plugin(), &init, vec![a, b])
             .await
             .unwrap();
@@ -610,13 +620,16 @@ mod tests {
                 ..Anchor::default()
             }),
         ];
-        let init = InitializeParams {
-            site: SiteInfo {
-                files: vec!["a.rst".into(), "b.rst".into()],
-                ..SiteInfo::default()
+        let init = lsdocs_plugin_sdk::Setup::with_settings(
+            InitializeParams {
+                site: SiteInfo {
+                    files: vec!["a.rst".into(), "b.rst".into()],
+                    ..SiteInfo::default()
+                },
+                ..InitializeParams::default()
             },
-            ..InitializeParams::default()
-        };
+            serde_json::Value::Null,
+        );
         let mut out = testing::run_transform(&plugin(), &init, vec![a, b])
             .await
             .unwrap();
